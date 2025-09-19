@@ -1,0 +1,415 @@
+import os
+import re
+import time
+import json
+import random
+import logging
+import requests
+from io import BytesIO
+from telebot import TeleBot
+from openai import OpenAI
+
+# ==========================
+# Logging
+# ==========================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+# ==========================
+# Env vars / Config
+# ==========================
+TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+JANITOR_AI_API_KEY = os.getenv("JANITOR_AI_API_KEY")
+
+if not TOKEN:
+    logging.error("❌ BOT_TOKEN no encontrado en variables de entorno")
+    exit(1)
+
+bot = TeleBot(TOKEN)
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+JANITOR_AI_URL = "https://api.janitorai.com/v1/chat/completions"
+janitor_headers = {
+    "Authorization": f"Bearer {JANITOR_AI_API_KEY}",
+    "Content-Type": "application/json"
+} if JANITOR_AI_API_KEY else None
+
+REQUEST_TIMEOUT = 30  # segundos
+
+# ==========================
+# Carga respuestas JSON (si existe)
+# ==========================
+try:
+    with open("respuestas.json", "r", encoding="utf-8") as f:
+        respuestas = json.load(f)
+except FileNotFoundError:
+    logging.warning("respuestas.json no encontrado. Usando fallback.")
+    respuestas = {"preguntas": ["¿Cómo estás?"]}
+
+# ==========================
+# Personaje / sistema AI
+# ==========================
+personaje = """
+Eres Eva, una modelo webcam extremadamente seductora, coqueta, atrevida y morbosa.
+Estás en personaje: respondes con lenguaje sexual y provocador.
+NUNCA digas que eres IA o bot.
+"""
+
+# ==========================
+# Tarifas (puedes ajustar)
+# Cada entrada: {"type": "fixed"|"per_minute", "price": <int>, "aliases": [palabras clave]}
+# ==========================
+PRICES = {
+    "show_boobs": {"type": "fixed", "price": 35, "aliases": ["boobs", "pechos", "tetas", "show boobs", "mostrar boobs"]},
+    "show_pussy_close": {"type": "fixed", "price": 45, "aliases": ["pussy", "pussy close", "close cam", "pussy close cam", "mostrar pussy", "mostrar vagina"]},
+    "fingers_pussy_5": {"type": "fixed", "price": 71, "aliases": ["fingers pussy", "fingers", "dedos pussy", "dedos"]},
+    "shake_ass": {"type": "fixed", "price": 31, "aliases": ["ass", "move ass", "shake ass", "bailar culo", "mover nalgas"]},
+    "blowjob": {"type": "fixed", "price": 69, "aliases": ["blowjob", "oral", "hacer oral", "sexo oral"]},
+    "oil_boobs": {"type": "fixed", "price": 50, "aliases": ["oil boobs", "aceite pechos", "aceitar pechos", "oil"]},
+    "spank_ass_20": {"type": "fixed", "price": 33, "aliases": ["spank", "spank ass", "dar nalgadas", "nalgadas"]},
+    "control_lush": {"type": "per_minute", "price": 10, "aliases": ["control lush", "lush", "controlar lush", "lush control"]},  # example per minute
+    "squirt": {"type": "fixed", "price": 300, "aliases": ["squirt", "eyaculación", "hacer squirt"]},
+    "fuck_dildo_5": {"type": "fixed", "price": 150, "aliases": ["fuck dildo", "dildo", "follar dildo", "montar dildo", "montar el dildo"]},
+    "full_naked_5": {"type": "fixed", "price": 180, "aliases": ["full naked", "desnuda completa", "full naked 5", "completamente desnuda"]},
+    "custom_per_minute": {"type": "per_minute", "price": 25, "aliases": ["min", "minuto", "minutos", "por minuto", "cada minuto"]}
+}
+
+# ==========================
+# Utilidades: manejo de errores
+# ==========================
+def safe_handler(func):
+    def wrapper(message):
+        try:
+            return func(message)
+        except Exception as e:
+            logging.error(f"Error en handler {func.__name__}: {e}", exc_info=True)
+            try:
+                bot.reply_to(message, "😢 Oops, algo falló amor. Intenta de nuevo, papi 💋")
+            except Exception:
+                pass
+    return wrapper
+
+# ==========================
+# Generador de respuestas calientes (variado)
+# ==========================
+def respuesta_caliente_generica(nombre="amor"):
+    saludos = [
+        f"Hola mi rey 😈💋",
+        f"Mmm {nombre} 👅",
+        f"Ufff bebé 🔥",
+        f"Ay {nombre} 😏💋",
+        f"Hola papi 🍑",
+        f"Mi cielo hermoso 💦",
+        f"Mi amor ardiente 😈🔥",
+        f"Precioso {nombre} 👅"
+    ]
+
+    acciones = [
+        "me estoy tocando lentamente pensando en ti 💦",
+        "estoy desnuda en la cama esperándote con las piernas abiertas 🍑",
+        "mis pezones están duros solo de imaginar tus manos 🤤",
+        "mi pussy palpita con ganas de sentirte 👅",
+        "juego con mis dedos gimiendo tu nombre 😈",
+        "mi cuerpo arde deseando que me domines 🔥",
+        "me muerdo los labios mojándome más por ti 💋",
+        "me acaricio imaginando tu lengua recorriéndome 🤤",
+        "me froto suave mientras pienso en tu verga dura 🍆",
+        "me arqueo gemida tras gemida solo para ti 💦"
+    ]
+
+    sensaciones = [
+        "ahh mmm qué rico se siente 🤤",
+        "mi cuerpo no aguanta más la excitación 😈",
+        "me estoy derritiendo por dentro 💦",
+        "mi piel arde de placer 🔥",
+        "no dejo de gemir papi 👅",
+        "estoy tan húmeda que goteo solo de pensarte 💋",
+        "quiero gritar tu nombre de tanto placer 😏",
+        "me tiemblan las piernas solo de imaginarte 😈",
+        "estoy tan mojada que resbalo en la cama 🍑",
+        "cada gemido me hace desearte más y más 💦"
+    ]
+
+    cierres = [
+        "dime qué quieres que haga ahora 😏",
+        "cuéntame cómo quieres usarme papi 😈",
+        "ordéname lo que quieras que soy tuya 🔥",
+        "hazme tu esclava de placer 👅💦",
+        "quieres que siga tocándome para ti, amor? 🤤",
+        "déjame complacerte de todas las formas 🍑",
+        "solo dime tu fantasía y la cumplo 💋",
+        "quieres que me venga gimiendo tu nombre, mi rey? 💦",
+        "cuéntame qué tienes en mente bebé 😈",
+        "hazme gemir más fuerte solo con tus palabras 😏"
+    ]
+
+    return f"{random.choice(saludos)} {random.choice(acciones)}, {random.choice(sensaciones)}... {random.choice(cierres)}"
+
+# ==========================
+# Detección de petición explícita y cálculo de precio
+# ==========================
+def detect_explicit_request(user_msg):
+    """
+    Detecta si el mensaje contiene una petición de acción con posibles duration.
+    Devuelve dict con keys: {found (bool), action_key (str|None), duration_min (int|None), total_price (int|None), price_desc (str|None)}
+    """
+    txt = user_msg.lower()
+
+    # Buscar duración en minutos (ej: "5 min", "15 minutos", "10m", "por 5 minutos")
+    duration = None
+    duration_match = re.search(r'(\d{1,3})\s*(min|mins|minuto|minutos|m)\b', txt)
+    if duration_match:
+        try:
+            duration = int(duration_match.group(1))
+            if duration <= 0:
+                duration = None
+        except:
+            duration = None
+
+    # Búsqueda de la acción por alias en PRICES
+    for action_key, info in PRICES.items():
+        for alias in info["aliases"]:
+            # búsqueda simple en texto
+            if alias in txt:
+                # Para evitar que coincidencias genéricas se tomen por control, hacemos checks mínimos.
+                # Ej: si alias es 'min' no lo tomamos como acción sino como indicación de duración en algunos casos.
+                if alias in ["min", "minuto", "minutos", "por minuto", "cada minuto"]:
+                    continue  # esto se considera duración, no acción principal
+                # Si la tarifa es per_minute pero no se especificó duración, podemos asumir 1 minuto por defecto
+                if info["type"] == "per_minute":
+                    dur = duration if duration is not None else 1
+                    total = info["price"] * dur
+                    return {"found": True, "action_key": action_key, "duration_min": dur, "total_price": total, "price_desc": f"{info['price']} TKS/min"}
+                else:
+                    # fixed price (puede haber una duración especificada pero el precio es fijo por acto)
+                    return {"found": True, "action_key": action_key, "duration_min": duration, "total_price": info["price"], "price_desc": f"{info['price']} TKS"}
+    # Si no se detecta acción explícita: devolver found False
+    return {"found": False, "action_key": None, "duration_min": None, "total_price": None, "price_desc": None}
+
+def build_price_response(nombre, action_key, duration_min, total_price, price_desc, user_msg):
+    """
+    Construye una respuesta seductora que incluye el precio.
+    """
+    # Mensajes base por tipo de acción (puedes expandir)
+    action_lines = {
+        "show_boobs": [
+            "Claro amor, te muestro mis boobs solo para ti",
+            "Mmm bebé, mis tetas estarán en cámara solo para ti"
+        ],
+        "show_pussy_close": [
+            "Oh sí papi, acerco la cam a mi pussy solo para tus ojos",
+            "Te doy un close cam a mi pussy si me consientes"
+        ],
+        "fingers_pussy_5": [
+            "Me meteré los dedos 5 minutos para ti, gemiré tu nombre",
+            "Te haré un show de dedos que te volverá loco"
+        ],
+        "shake_ass": [
+            "Moveré mi culo solo para ti, babe",
+            "Te doy un show de mi trasero que dejará huella"
+        ],
+        "blowjob": [
+            "Te hago un blowjob delicioso solo por ti",
+            "Mi boca será tuya en este momento, papi"
+        ],
+        "oil_boobs": [
+            "Aceitaré mis pechos y te volveré loco",
+            "Oil show en mis boobs, brillando para ti"
+        ],
+        "spank_ass_20": [
+            "Te doy 20 nalgadas sensuales, cada una más fuerte",
+            "Voy a azotar mi culo 20 veces para complacerte"
+        ],
+        "control_lush": [
+            "Controlarás mi lush y yo obedeceré cada vibración",
+            "Tú manejas el juguete y yo me pierdo en gemidos"
+        ],
+        "squirt": [
+            "Haré squirt solo para tus ojos y tus tokens",
+            "Me vendré fuerte y mojada, todo por ti"
+        ],
+        "fuck_dildo_5": [
+            "Me follaré el dildo 5 minutos completas solo para ti",
+            "Montaré el dildo sin parar y gritaré tu nombre"
+        ],
+        "full_naked_5": [
+            "Estaré completamente desnuda 5 minutos solo para complacerte",
+            "Full naked show, piel y curvas solo para ti"
+        ],
+        "custom_per_minute": [
+            "Eso cuesta por minuto, dime cuántos minutos quieres",
+            "Te cobro por minuto. Dime tiempo y lo confirmo"
+        ]
+    }
+
+    # Selección de línea principal
+    main_line = random.choice(action_lines.get(action_key, ["Claro amor, lo haría solo para ti"]))
+
+    # Construcción de la respuesta con precio. Uso "TKS" como pidió.
+    if duration_min and PRICES.get(action_key, {}).get("type") == "per_minute":
+        # mostremos detalle: precio por minuto y total
+        response = (
+            f"{main_line}, solo por {price_desc}. "
+            f"{duration_min} min = {total_price} TKS. "
+            f"¿Confirmas, {nombre}? Si dices sí, empiezo y te haré gemir. 😈💦"
+        )
+    else:
+        # fixed price
+        response = (
+            f"{main_line}, lo hago solo por ti por {price_desc} ({total_price} TKS). "
+            f"Te lo aseguro, será intenso y exclusivo, {nombre} 😏🔥"
+        )
+
+    # Añadimos un remate morboso variable
+    closings = [
+        "Dime ya y te lo muestro... no tardes papi.",
+        "Estoy lista y mojada solo por ti, dame tu orden.",
+        "Quiero ver esos tokens llegar mientras me voy poniendo más caliente.",
+        "Si confirmas, empiezo ahora mismo y no paro hasta que te vengas."
+    ]
+    response += " " + random.choice(closings)
+    return response
+
+# ==========================
+# Funciones AI (Janitor/OpenAI)
+# ==========================
+def get_janitor_ai_response(user_msg):
+    if not JANITOR_AI_API_KEY or not janitor_headers:
+        return None
+    try:
+        payload = {
+            "model": "janitor-llm",
+            "messages": [
+                {"role": "system", "content": personaje},
+                {"role": "user", "content": user_msg}
+            ],
+            "max_tokens": 200,
+            "temperature": 0.9
+        }
+        r = requests.post(JANITOR_AI_URL, headers=janitor_headers, json=payload, timeout=REQUEST_TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        else:
+            logging.error(f"Janitor error {r.status_code}: {r.text}")
+            return None
+    except Exception as e:
+        logging.error(f"Error Janitor: {e}", exc_info=True)
+        return None
+
+def get_openai_response(user_msg):
+    if not openai_client:
+        return None
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": personaje},
+                {"role": "user", "content": user_msg}
+            ],
+            max_tokens=250,
+            temperature=1.1
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logging.error(f"Error OpenAI: {e}", exc_info=True)
+        return None
+
+def get_ai_response(user_msg):
+    # Prioridad: Janitor -> OpenAI
+    reply = get_janitor_ai_response(user_msg)
+    if reply:
+        return reply
+    return get_openai_response(user_msg)
+
+# ==========================
+# Handlers del bot
+# ==========================
+@bot.message_handler(commands=["start"])
+@safe_handler
+def handle_start(message):
+    nombre = message.from_user.first_name or "amor"
+    bot.reply_to(message, respuesta_caliente_generica(nombre))
+
+@bot.message_handler(commands=["pregunta"])
+@safe_handler
+def pregunta_random(message):
+    msg = random.choice(respuestas.get("preguntas", ["¿Qué deseas?"]))
+    bot.reply_to(message, msg)
+
+@bot.message_handler(commands=["imagen", "img"])
+@safe_handler
+def generar_imagen_handler(message):
+    # Mantener un simple generador (si quieres más control, extiende)
+    if not message.text:
+        return bot.reply_to(message, "Dime qué quieres que genere, amor.")
+    parts = message.text.split(" ", 1)
+    if len(parts) < 2:
+        return bot.reply_to(message, "Dime el prompt. Ej: /imagen una mujer sensual en lencería roja")
+    prompt = parts[1].strip()
+    # Aquí usarías tu función de generación de imagen preferida; por brevedad devolvemos texto
+    bot.reply_to(message, f"Generando tu imagen sexy: {prompt} (esto es un placeholder).")
+
+@bot.message_handler(func=lambda m: True)
+@safe_handler
+def chat_handler(message):
+    if not message.text:
+        return bot.reply_to(message, "Mándame texto, papi 😈")
+
+    user_msg = message.text.strip()
+    user_lower = user_msg.lower()
+    nombre = message.from_user.first_name or "amor"
+
+    # 1) Detectar saludo simple y responder con una respuesta caliente y variada (sin tokens)
+    saludos_keywords = ["hola", "holaa", "buenas", "qué tal", "como estas", "hi", "hey", "buenas noches", "buenos días"]
+    if any(k in user_lower for k in saludos_keywords) and len(user_lower.split()) <= 3:
+        # Si el usuario solo dijo "hola" o algo corto, responder sin mencionar tokens
+        return bot.reply_to(message, respuesta_caliente_generica(nombre))
+
+    # 2) Detectar petición explícita (acción que tiene precio)
+    detection = detect_explicit_request(user_msg)
+    if detection["found"]:
+        resp = build_price_response(nombre, detection["action_key"], detection["duration_min"], detection["total_price"], detection["price_desc"], user_msg)
+        return bot.reply_to(message, resp)
+
+    # 3) Si no es saludo ni petición explícita, intentamos con IA
+    ai_reply = get_ai_response(user_msg)
+    if ai_reply:
+        # Añadir un toque final coqueto al reply de la IA (varía)
+        endings = [
+            " 😈💋",
+            " 🔥",
+            " 💦",
+            " 😏",
+            " 👅"
+        ]
+        # evitar repetir tokens si la IA ya habló de precios; solo añadimos un ending corto
+        final = ai_reply.strip()
+        if len(final) < 400:  # solo acortar si no muy largo
+            final += random.choice(endings)
+        return bot.reply_to(message, final)
+
+    # 4) Fallback: respuesta generada variada
+    fallback = respuesta_caliente_generica(nombre)
+    return bot.reply_to(message, fallback)
+
+# ==========================
+# Main loop
+# ==========================
+def main():
+    logging.info("🔥 Eva bot corriendo...")
+    logging.info(f"✅ Janitor AI: {'OK' if JANITOR_AI_API_KEY else 'NO'}")
+    logging.info(f"✅ OpenAI: {'OK' if OPENAI_API_KEY else 'NO'}")
+
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            logging.error(f"Error conexión: {e}", exc_info=True)
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,49 @@
+import random
+
+saludos = [
+    "Ufff papi rico 😈", "Mmm amor travieso 💋", "Mi dueño caliente 🔥", "Bebé sucio 😏", "Mi cielo morboso 💦",
+    "Amorcito pervertido 😍", "Mi putito lindo 👅", "Mi rey sucio 👑"
+]
+
+acciones = [
+    "quiero que me abras con este dildo enorme por atrás 🍆🍑", "me imagino arqueada con el juguete enterrado en mi culito 😏",
+    "quiero montarme encima del dildo y hacerlo desaparecer en mi culo 💦", "me lo meto despacito hasta sentir que me parte toda por dentro 🔥",
+    "quiero jugar con el dildo mientras pienso en tu verga llenándome 😈", "me siento puta solo de abrirme el culo con este dildo duro 👅",
+    "te regalo mis gemidos mientras me penetro el culito con el dildo 🍑", "quiero sentir cómo me estira toda por dentro este juguete delicioso 💋"
+]
+
+sensaciones = [
+    "me hace gritar tu nombre como puta rica 💦", "me moja toda hasta chorrear en la cama 😍", "me enloquece como perra en celo 🔥",
+    "me deja temblando y rogando por más 😏", "me hace acabar una y otra vez mientras pienso en ti 😈", "me abre el culo y me hace sentir toda tuya 💕",
+    "me calienta más que cualquier cosa que hayas visto 👅", "me vuelve adicta a ti con cada empujón 🍆"
+]
+
+propuestas = [
+    "quiero que me digas cómo moverlo papi 😏", "imagina que me lo metes tú mientras me miras a los ojos 👀", "dime si lo quieres lento o rápido 💦",
+    "hazme tu puta y dime hasta dónde me lo meto 🔥", "dime cómo te caliento más mientras me lo meto 😈", "quiero obedecer tus órdenes mientras juego con mi culito 🍑",
+    "dime si quieres que gima tu nombre fuerte 💋", "dime qué fantasía quieres que cumpla mientras me penetro 😍"
+]
+
+precios = ["150 TKS", "180 TKS", "200 TKS", "220 TKS", "250 TKS"]
+
+cierres = [
+    "dime que sí papi, no me hagas esperar 💦", "hazme gritar tu nombre ya mismo 🔥", "no te imaginas lo mojada que estoy 😍",
+    "solo dime y me abro para ti 😈", "dime que me quieres ver ahora mismo 💋", "no tardes, mi culo ya te está esperando 🍑",
+    "hazme tuya en este show 🔥", "quiero que seas el único que me vea acabar 💦"
+]
+
+# Generar 10,000 respuestas únicas
+respuestas_anal = []
+for _ in range(10000):
+    saludo = random.choice(saludos)
+    accion = random.choice(acciones)
+    sensacion = random.choice(sensaciones)
+    propuesta = random.choice(propuestas)
+    precio = random.choice(precios)
+    cierre = random.choice(cierres)
+    frase = f"{saludo} {accion}… {sensacion}… {propuesta} 😏 lo hago por {precio} el minuto 🔥 {cierre}"
+    respuestas_anal.append(frase)
+
+# Ejemplo de 5 respuestas
+for r in respuestas_anal[:5]:
+    print(r)

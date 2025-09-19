@@ -1,0 +1,92 @@
+import telebot
+import os
+import time
+import random
+
+# Cargar el token del bot
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    print("❌ Error: BOT_TOKEN no encontrado en las variables de entorno")
+    exit(1)
+
+bot = telebot.TeleBot(TOKEN)
+
+# --- Clasificador de mensajes ---
+def clasificar_mensaje(user_msg: str) -> str:
+    """Clasifica el tipo de mensaje del usuario"""
+    msg = user_msg.lower()
+
+    personales = ["saber de ti", "cómo estás", "me interesas", "me importa", "conocerte", "háblame de ti"]
+    sexuales = ["muéstrame", "quiero verte", "enséñame", "haz", "dildo", "tócate", "desnúdate", "boobs", "pussy", "culo", "tetas", "chúpame"]
+
+    if any(p in msg for p in personales):
+        return "personal"
+    elif any(s in msg for s in sexuales):
+        return "sexual"
+    else:
+        return "neutro"
+
+# --- Handlers de comandos ---
+@bot.message_handler(commands=['start'])
+def start(message):
+    respuestas_inicio = [
+        f"Hola {message.from_user.first_name} 😘 soy Eva, tu modelo favorita 🔥 ¿qué quieres hacer hoy conmigo?",
+        f"Mmm {message.from_user.first_name} 💋 te estaba esperando… ¿quieres algo rico conmigo amor?",
+        f"Ay papi {message.from_user.first_name} 😈 me encantas, dime qué deseas de mí 💦"
+    ]
+    bot.reply_to(message, random.choice(respuestas_inicio))
+
+# --- Chat general ---
+@bot.message_handler(func=lambda message: True)
+def chat(message):
+    try:
+        user_msg = message.text
+        tipo = clasificar_mensaje(user_msg)
+
+        if tipo == "personal":
+            respuestas = [
+                f"Claro {message.from_user.first_name} 😘 cuéntame qué quieres saber de mí… ¿qué te llama la atención de mi transmisión? 💋",
+                f"Mmm amor, me gusta que quieras conocerme mejor 💕 dime, ¿qué te gustaría saber de mí? 😏",
+                f"Qué tierno eres {message.from_user.first_name} 😍 además de lo morbosa que soy, también me encanta hablar contigo 💦 ¿qué quieres preguntarme?",
+                f"Ay mi rey 😘 contigo no solo quiero ser morbosa, también me gusta conversar… ¿qué quieres descubrir de mí? 🔥",
+                f"Eso me derrite {message.from_user.first_name} 😍 dime amor, ¿qué detalle mío te intriga más? 💋"
+            ]
+        
+        elif tipo == "sexual":
+            respuestas = [
+                f"Ufff {message.from_user.first_name} 😈 eso me calienta… lo haría por ti amor, pero ya sabes que vale 150 TKS por minuto 💋",
+                f"Mmm bebé 🔥 qué atrevido… claro que puedo hacerlo solo para ti 😏 pero necesitas darme tus tokens 💦",
+                f"Ahh sí amor 🍑 saltando en mi dildo sería delicioso… te lo hago por 200 TKS por minuto, ¿quieres que empiece ya? 😈",
+                f"Qué rico lo que me pides {message.from_user.first_name} 😍 puedo hacerlo, pero recuerda que son 180 TKS por 5 minutos 💋",
+                f"Mmm papi 👅 esa fantasía me encanta… dame 300 TKS y me vuelvo toda tuya haciéndolo 🔥"
+            ]
+        
+        else:  # neutro
+            respuestas = [
+                f"Hola {message.from_user.first_name} 😘 qué rico verte aquí conmigo 🔥",
+                f"Mmm bebé 💋 estaba pensando en ti… ¿qué tienes en mente hoy?",
+                f"Ay amor 😈 me encantas… cuéntame qué deseas hacer conmigo 💦",
+                f"Ufff {message.from_user.first_name} 😏 solo con verte aquí ya me pongo caliente 💋",
+                f"Hola precioso 😍 me alegra tenerte acá conmigo… ¿quieres que te muestre algo rico?"
+            ]
+
+        reply = random.choice(respuestas)
+        bot.reply_to(message, reply)
+
+    except Exception as e:
+        print(f"Error en chat: {e}")
+        bot.reply_to(message, "Ay amor 😏 me puse tan caliente que me confundí… dime otra vez lo que quieres 💋")
+
+# --- Main loop ---
+def main():
+    print("🔥 Eva - Modelo webcam bot corriendo...")
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"Error de conexión: {e}")
+            print("🔄 Reintentando en 5 segundos...")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()

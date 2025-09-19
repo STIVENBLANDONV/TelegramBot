@@ -1,0 +1,69 @@
+🔑 Problema actual
+
+El bot no interpreta bien el contexto del mensaje.
+
+Responde siempre con frases predefinidas y genéricas, sin tener en cuenta si el usuario está preguntando algo personal, de memoria, o de interacción real.
+
+✅ Solución
+
+Hay que añadir una detección más específica de intenciones en el clasificador.
+
+Por ejemplo:
+
+Si el usuario escribe cosas como:
+
+“¿No me recuerdas?”
+
+“¿Te acuerdas de mí?”
+
+“Me extrañaste?”
+
+“Te olvidaste de mí?”
+→ El bot debe responder con frases más humanas tipo:
+
+“Claro que sí mi amor 😍 cómo olvidarte si me encantas 💋”
+
+“Mmm bebé, claro que te recuerdo 😈 siempre pienso en ti…”
+
+“Ay mi cielo 😘 imposible olvidarte, me calientas solo con aparecer 💦”
+
+🔧 Ejemplo de ajuste en código
+
+Ampliamos la función clasificar_mensaje para incluir la categoría recuerdo:
+
+def clasificar_mensaje(user_msg: str) -> str:
+    """Clasifica el tipo de mensaje del usuario"""
+    msg = user_msg.lower()
+
+    personales = ["saber de ti", "cómo estás", "me interesas", "me importa", "conocerte", "háblame de ti"]
+    sexuales = ["muéstrame", "quiero verte", "enséñame", "haz", "dildo", "tócate", "desnúdate", "boobs", "pussy", "culo", "tetas", "chúpame"]
+    recuerdos = ["me recuerdas", "te acuerdas", "me extrañaste", "te olvidaste"]
+
+    if any(p in msg for p in personales):
+        return "personal"
+    elif any(s in msg for s in sexuales):
+        return "sexual"
+    elif any(r in msg for r in recuerdos):
+        return "recuerdo"
+    else:
+        return "neutro"
+
+
+Y luego en el handler principal agregamos las respuestas para recuerdo:
+
+elif tipo == "recuerdo":
+    respuestas = [
+        f"Claro que sí {message.from_user.first_name} 😘 cómo podría olvidarte si me encantas 💋",
+        f"Mmm bebé, claro que te recuerdo 😈 siempre pienso en ti…",
+        f"Ay mi cielo 😍 imposible olvidarte, me calientas solo con aparecer 💦",
+        f"Obvio que sí amor 😏 eres inolvidable para mí 💋",
+        f"Mi rey 😘 cómo no recordarte… me dejas marcada cada vez que vienes 🔥"
+    ]
+
+
+
+📌 Con esto:
+
+Si el usuario dice “No me recuerdas?” → el bot responde algo natural, como si realmente lo recordara.
+
+Ya no cae en la respuesta genérica de “solo con verte aquí me pongo caliente”.

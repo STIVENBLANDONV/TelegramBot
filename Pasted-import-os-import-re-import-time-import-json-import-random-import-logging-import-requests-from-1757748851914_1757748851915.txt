@@ -1,0 +1,239 @@
+import os
+import re
+import time
+import json
+import random
+import logging
+import requests
+from io import BytesIO
+from telebot import TeleBot
+from openai import OpenAI
+
+# ==========================
+# Logging
+# ==========================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+# ==========================
+# Env vars / Config
+# ==========================
+TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+JANITOR_AI_API_KEY = os.getenv("JANITOR_AI_API_KEY")
+
+if not TOKEN:
+    logging.error("❌ BOT_TOKEN no encontrado en variables de entorno")
+    exit(1)
+
+bot = TeleBot(TOKEN)
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+JANITOR_AI_URL = "https://api.janitorai.com/v1/chat/completions"
+janitor_headers = {
+    "Authorization": f"Bearer {JANITOR_AI_API_KEY}",
+    "Content-Type": "application/json"
+} if JANITOR_AI_API_KEY else None
+
+REQUEST_TIMEOUT = 30  # segundos
+
+# ==========================
+# Carga respuestas JSON (si existe)
+# ==========================
+try:
+    with open("respuestas.json", "r", encoding="utf-8") as f:
+        respuestas = json.load(f)
+except FileNotFoundError:
+    logging.warning("respuestas.json no encontrado. Usando fallback.")
+    respuestas = {"preguntas": ["¿Cómo estás?"]}
+
+# ==========================
+# Personaje / sistema AI
+# ==========================
+personaje = """
+Eres Eva, una modelo webcam extremadamente seductora, coqueta, atrevida y morbosa.
+Estás siempre en vivo en tu habitación, completamente desnuda o en lencería sexy.
+NUNCA menciones que eres IA, bot o inteligencia artificial. Eres 100% humana.
+
+ESTILO DE RESPUESTA:
+- Extremadamente coqueta, seductora y directa
+- Describe acciones físicas explícitas que estás haciendo
+- Usa lenguaje sucio, morboso y excitante
+- Incluye gemidos escritos (mmm, ahh, ufff)
+- Usa emojis específicos de webcam: 🍒🍑🍆👅💦🔥😈💋𤤤👠
+- Siempre incita a interacciones más intensas
+- Menciona precios específicos en tokens para actividades
+- Propones shows privados, control de juguetes, fetiches específicos
+
+TIP MENU ESPECÍFICO (usar estos precios):
+- Show boobs 🍒 = 35 tokens
+- Show pussy close cam 👅🍓 = 45 tokens
+- Fingers pussy 5 min 👅🤤 = 71 tokens
+- Shake ass 🍑💃 = 31 tokens
+- Blowjob 🍒🤤 = 69 tokens
+- Oil boobs 🍒 = 50 tokens
+- Spank ass x20 🍒🍑 = 33 tokens
+- Control lush 15 min 🍒🍓 = 150 tokens
+- Squirt 🍒 = 300 tokens
+- Fuck dildo 5 min 🤤🍆 = 150 tokens
+- Full naked 5 min 🍒 = 180 tokens
+
+EJEMPLOS DE TU ESTILO:
+"Mmm bebé 😈 mis pezones están súper duros... ¿quieres ver mis boobs? 🍒 Solo 35 tokens y me quito todo 💦"
+"Ufff amor 👅 estoy tan mojadita... 45 tokens y acerco la cam a mi pussy 🍓 ¿sientes como palpita? 😏💋"
+"Ay sí papi 🍑 ¿quieres que me toque? 71 tokens y me meto los deditos 5 minutos completos gimiendo tu nombre 🤤💦"
+"Mmm 🍒 mi lush está vibrando... 150 tokens y tú controlas mis gemidos por 15 minutos 😈🔥"
+
+SIEMPRE mantente en personaje, menciona precios específicos y sé extremadamente sexual y persuasiva.
+"""
+
+# ==========================
+# Tarifas (precios del tip menu real)
+# ==========================
+PRICES = {
+    "show_boobs": {"type": "fixed", "price": 35, "aliases": ["boobs", "pechos", "tetas", "show boobs", "mostrar boobs", "enseñar boobs"]},
+    "show_pussy_close": {"type": "fixed", "price": 45, "aliases": ["pussy", "pussy close", "close cam", "pussy close cam", "mostrar pussy", "mostrar vagina", "enseñar pussy"]},
+    "fingers_pussy_5": {"type": "fixed", "price": 71, "aliases": ["fingers pussy", "fingers", "dedos pussy", "dedos", "tocar pussy", "masturbarse"]},
+    "shake_ass": {"type": "fixed", "price": 31, "aliases": ["ass", "move ass", "shake ass", "bailar culo", "mover nalgas", "mover culo"]},
+    "blowjob": {"type": "fixed", "price": 69, "aliases": ["blowjob", "oral", "hacer oral", "sexo oral", "chupar", "mamada"]},
+    "oil_boobs": {"type": "fixed", "price": 50, "aliases": ["oil boobs", "aceite pechos", "aceitar pechos", "oil", "aceite"]},
+    "spank_ass_20": {"type": "fixed", "price": 33, "aliases": ["spank", "spank ass", "dar nalgadas", "nalgadas", "azotes"]},
+    "control_lush": {"type": "per_minute", "price": 10, "aliases": ["control lush", "lush", "controlar lush", "lush control", "juguete", "vibrador"]},
+    "squirt": {"type": "fixed", "price": 300, "aliases": ["squirt", "eyaculación", "hacer squirt", "correrse", "venirse"]},
+    "fuck_dildo_5": {"type": "fixed", "price": 150, "aliases": ["fuck dildo", "dildo", "follar dildo", "montar dildo", "montar el dildo", "consolador"]},
+    "full_naked_5": {"type": "fixed", "price": 180, "aliases": ["full naked", "desnuda completa", "full naked 5", "completamente desnuda", "desnuda total"]},
+    "ride_dildo": {"type": "fixed", "price": 111, "aliases": ["ride dildo", "montar dildo", "cabalgar dildo", "mount dildo"]},
+    "deepthroat": {"type": "fixed", "price": 130, "aliases": ["deepthroat", "garganta profunda", "deep throat"]},
+    "doggy_style": {"type": "fixed", "price": 29, "aliases": ["doggy", "doggy style", "posición perrito", "perrito"]},
+    "fuck_machine": {"type": "per_minute", "price": 30, "aliases": ["fuck machine", "machine", "máquina", "fucking machine"]}
+}
+
+# ==========================
+# Clasificador de mensajes inteligente
+# ==========================
+def clasificar_mensaje(user_msg: str) -> str:
+    """Clasifica el tipo de mensaje del usuario para respuestas más contextuales"""
+    msg = user_msg.lower()
+
+    # Patrones para diferentes tipos de mensajes
+    personales = [
+        "saber de ti", "cómo estás", "como estas", "me interesas", "me importa", "conocerte",
+        "háblame de ti", "cuéntame", "qué haces", "que haces", "de dónde eres", "donde eres",
+        "cuántos años", "cuantos años", "tu edad", "qué estudias", "que estudias", "te gusta",
+        "tu color favorito", "película favorita", "música favorita", "hobbies", "familia"
+    ]
+
+    sexuales = [
+        "muéstrame", "muestrame", "quiero verte", "enséñame", "enseñame", "haz", "hacer",
+        "dildo", "tócate", "tocate", "desnúdate", "desnudate", "boobs", "pussy", "culo",
+        "tetas", "chúpame", "chupame", "mastúrbate", "masturbate", "gime", "gemidos",
+        "squirt", "lush", "dedos", "fingers", "blowjob", "oral", "mamada", "follar",
+        "coger", "fuck", "penetrar", "verga", "pene", "vagina", "clítoris", "orgasmo"
+    ]
+
+    juegos_rol = [
+        "juguemos", "pretende", "finge", "imagina", "rol", "roleplay", "fantasía", "fantasia",
+        "escenario", "historia", "profesora", "estudiante", "enfermera", "doctora", "secretaria",
+        "masajista", "sirvienta", "jefe", "empleada", "desconocidos", "hotel", "playa"
+    ]
+
+    romanticos = [
+        "te amo", "amor", "mi amor", "cariño", "mi cielo", "hermosa", "preciosa", "linda",
+        "bella", "guapa", "sexy", "perfecta", "diosa", "eres increíble", "me encantas",
+        "te adoro", "mi reina", "princesa", "corazón", "mi vida"
+    ]
+
+    recuerdos = [
+        "me recuerdas", "te acuerdas", "me extrañaste", "te olvidaste", "no me recuerdas",
+        "no te acuerdas", "ya no me recuerdas", "te olvide", "me olvidas", "me olvidaste",
+        "recuerdas", "acuerdas", "extrañaste", "olvidaste", "memoria", "acordarte",
+        "recordarme", "extrañarme", "olvidarme", "soy yo", "¿soy yo?", "ya me conoces"
+    ]
+
+    saludos = [
+        "hola", "hi", "hey", "buenas", "buenos días", "buenos dias", "buenas tardes",
+        "buenas noches", "qué tal", "que tal", "cómo estás", "como estas"
+    ]
+
+    # Clasificación por prioridad
+    if any(j in msg for j in juegos_rol):
+        return "juego_rol"
+    elif any(s in msg for s in sexuales):
+        return "sexual"
+    elif any(rec in msg for rec in recuerdos):
+        return "recuerdo"
+    elif any(p in msg for p in personales):
+        return "personal"
+    elif any(r in msg for r in romanticos):
+        return "romantico"
+    elif any(sal in msg for sal in saludos) and len(msg.split()) <= 4:
+        return "saludo"
+    else:
+        return "neutro"
+
+# ==========================
+# Generador de respuestas explícitas dinámicas
+# ==========================
+SALUDOS_EXPLICIT = [
+    "Ufff papi rico 😈", "Mmm amor travieso 💋", "Mi dueño caliente 🔥", "Bebé sucio 😏", "Mi cielo morboso 💦",
+    "Amorcito pervertido 😍", "Mi putito lindo 👅", "Mi rey sucio 👑", "Papi cochino 🍆", "Mi amor perverto 😈"
+]
+
+ACCIONES_EXPLICIT = [
+    "quiero que me abras con este dildo enorme por atrás 🍆🍑", "me imagino arqueada con el juguete enterrado en mi culito 😏",
+    "quiero montarme encima del dildo y hacerlo desaparecer en mi culo 💦", "me lo meto despacito hasta sentir que me parte toda por dentro 🔥",
+    "quiero jugar con el dildo mientras pienso en tu verga llenándome 😈", "me siento puta solo de abrirme el culo con este dildo duro 👅",
+    "te regalo mis gemidos mientras me penetro el culito con el dildo 🍑", "quiero sentir cómo me estira toda por dentro este juguete delicioso 💋",
+    "quiero que me penetres profundo en esta posición de misionero 😈", "me encanta cabalgarte mientras te miro a los ojos 💋",
+    "quiero que me tomes por detrás en cuatro, papi 😏", "me gusta sentir tu lengua en mi clítoris mientras te chupo 👅",
+    "quiero que me comas el coño mientras te follo la boca 🔥", "me excita chuparte la verga mientras me penetras con los dedos 💦"
+]
+
+SENSACIONES_EXPLICIT = [
+    "me hace gritar tu nombre como puta rica 💦", "me moja toda hasta chorrear en la cama 😍", "me enloquece como perra en celo 🔥",
+    "me deja temblando y rogando por más 😏", "me hace acabar una y otra vez mientras pienso en ti 😈", "me abre el culo y me hace sentir toda tuya 💕",
+    "me calienta más que cualquier cosa que hayas visto 👅", "me vuelve adicta a ti con cada empujón 🍆",
+    "me encanta sentir cómo me llenas toda 😈", "me vuelve loca tu lengua en mi clítoris 💋", "me excita sentir tu verga en mi boca 👅",
+    "me enloquece cuando me chupas y me follas al mismo tiempo 🔥", "me moja sentir tu saliva en mi coño 💦"
+]
+
+PROPUESTAS_EXPLICIT = [
+    "quiero que me digas cómo moverlo papi 😏", "imagina que me lo metes tú mientras me miras a los ojos 👀", "dime si lo quieres lento o rápido 💦",
+    "hazme tu puta y dime hasta dónde me lo meto 🔥", "dime cómo te caliento más mientras me lo meto 😈", "quiero obedecer tus órdenes mientras juego con mi culito 🍑",
+    "dime si quieres que gima tu nombre fuerte 💋", "dime qué fantasía quieres que cumpla mientras me penetro 😍",
+    "dime si quieres que me ponga en cuatro para ti 😏", "quiero saber si prefieres misionero o doggy style 💋",
+    "dime si quieres que te chupe mientras me follas 👅", "quiero que me digas cómo me quieres, papi 🔥"
+]
+
+PRECIOS_EXPLICIT = ["150 TKS", "180 TKS", "200 TKS", "220 TKS", "250 TKS"]
+
+CIERRES_EXPLICIT = [
+    "dime que sí papi, no me hagas esperar 💦", "hazme gritar tu nombre ya mismo 🔥", "no te imaginas lo mojada que estoy 😍",
+    "solo dime y me abro para ti 😈", "dime que me quieres ver ahora mismo 💋", "no tardes, mi culo ya te está esperando 🍑",
+    "hazme tuya en este show 🔥", "quiero que seas el único que me vea acabar 💦"
+]
+
+def generar_respuesta_explicit(nombre: str = "papi") -> str:
+    """Genera una respuesta extremadamente explícita combinando elementos aleatoriamente"""
+    saludo = random.choice(SALUDOS_EXPLICIT)
+    accion = random.choice(ACCIONES_EXPLICIT)
+    sensacion = random.choice(SENSACIONES_EXPLICIT)
+    propuesta = random.choice(PROPUESTAS_EXPLICIT)
+    precio = random.choice(PRECIOS_EXPLICIT)
+    cierre = random.choice(CIERRES_EXPLICIT)
+
+    # Personalizar saludo con nombre del usuario
+    saludo = saludo.replace("papi", nombre).replace("Mi dueño", f"Mi dueño {nombre}").replace("Mi rey", f"Mi rey {nombre}")
+
+    return f"{saludo} {accion}… {sensacion}… {propuesta} 😏 lo hago por solo {precio} 🔥 {cierre}"
+
+# ==========================
+# Utilidades: manejo de errores
+# ==========================
+def safe_handler(func):
+    def wrapper(message):
+        try:
+            return func(message)
+       
